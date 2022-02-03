@@ -6,9 +6,9 @@ shinyApp(
     
     
     sliderInput("week.test", "Current Week:",
-                min=273, max=312, value=273),
+                min=273, max=nrow(ds), value=273),
     selectInput("set.alpha", "Alpha",
-                choices=list(0.01,0.025, 0.05, 0.1), selected=0.025),
+                choices=list(0.01,0.025, 0.05, 0.1), selected=0.05),
     selectInput("set.b", "Number of historical years (default 5)",
                 choices=list(2,3,4,5,6), selected=c(5)),
     selectInput("set.w", "Number of surrounding weeks on either side to use from historical period (default 3)",

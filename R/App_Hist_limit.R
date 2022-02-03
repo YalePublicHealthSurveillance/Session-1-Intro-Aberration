@@ -7,7 +7,7 @@ app.hist.limit <-function(ds=ds1, datevar='date', casevar='cases'){
     
     
     sliderInput("week.test", "Current Week:",
-                min=273, max=312, value=273),
+                min=273, max=nrow(ds), value=273),
     selectInput("set.alpha", "Alpha",
                 choices=list(0.01,0.025, 0.05, 0.1), selected=0.025),
     selectInput("set.b", "Number of historical years",
