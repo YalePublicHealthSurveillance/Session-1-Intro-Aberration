@@ -6,7 +6,7 @@ shinyApp(
     
     
     sliderInput("week.test", "Current Week:",
-                min=273, max=nrow(ds), value=273),
+                min=273, max=nrow(ds), value=273, step=1),
     selectInput("set.alpha", "Alpha",
                 choices=list(0.01,0.025, 0.05, 0.1), selected=0.05),
     selectInput("set.b", "Number of historical years (default 5)",
@@ -47,15 +47,15 @@ shinyApp(
                                          alpha=as.numeric(input$set.alpha)
                             ))
       
-      col.vec<-rep(1, times=length(observed))
+      col.vec<-rep(1, times=length(ds[,casevar]))
       col.vec[c(input$week.test) ]<-2 + mod1$alarm*2
       col.vec[train.points]<-3
       col.select<-c('white', 'blue', 'black','red')
       
       cols<-c('gray', 'black', 'red')
-      plot.obs <- mod1$disProgObj$observed
-      plot.obs[input$week.test+1 : length(plot.obs)] <- NA
-      plot(plot.obs , pch=16 , bty='l', ylab='Cases', xlab='Week',  col=col.select[col.vec])
+      plot.obs <- ds[,casevar]
+      plot.obs[(input$week.test+1) : length(plot.obs)] <- NA
+      plot(plot.obs , pch=16 , bty='l', ylab='Cases', xlab='Week',  col=col.select[col.vec], xlim=c(1,length(plot.obs)))
       points(c(rep(NA, times=(input$week.test-1)) , mod1$upperbound), type='p', col='purple', pch="-")
       points(plot.obs ,type='l', col='gray')
       

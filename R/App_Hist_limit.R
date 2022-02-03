@@ -47,7 +47,7 @@ app.hist.limit <-function(ds=ds1, datevar='date', casevar='cases'){
       
       alarm <-  all.agg[input$week.test] > upCI
       
-      col.alarms<-c(rep(2, times=(input$week.test-1)) , (hl1$alarm+3), rep(1, times=length(surv.ds1$observed)-input$week.test ) )
+      col.alarms<-c(rep(2, times=(input$week.test-1)) , (alarm+3), rep(1, times=length(surv.ds1$observed)-input$week.test ) )
       
       trans.white<-rgb(1,1,1,alpha=0.8)
       
