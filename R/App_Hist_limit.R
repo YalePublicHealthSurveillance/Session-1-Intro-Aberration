@@ -19,8 +19,8 @@ app.hist.limit <-function(ds=ds1, datevar='date', casevar='cases'){
   server=function(input, output){
     output$periodPlot = renderPlot({
       
-      b=input$set.b
-      m=input$set.m
+      b=as.numeric(input$set.b)
+      m=as.numeric(input$set.m)
       freq=52
       alpha=as.numeric(input$set.alpha)
       all.agg<-rollapply(surv.ds1$observed,4,mean, align='right', fill=NA)

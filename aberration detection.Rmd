@@ -148,51 +148,12 @@ This method has several advantages:
 3. Like the Historical limits method, this method deals with seasonality by only taking values from the same time of year when setting a threshold.
 4. Designed for count data and doesn't make assumptions about the data being normally distributed; this is more appropriate for sparse data
 
-*What happens if you don't downweight past epidemics?*
+*What happens if you don't down-weight past epidemics?*
+
+The gray lines here show you the observed number of cases at each week. The black dots show which data are used for model fitting. The purple dash shows the epidemic threshold for the current week.
 
 ```{r farrington1, echo=TRUE}
-#for(i in c(260:270))
-
-
-shinyApp(
-  ui=fluidPage(
-    
-
-    sliderInput("week.test", "Current Week:",
-                min=273, max=312, value=273),
-      selectInput("set.alpha", "Alpha",
-                choices=list(0.01,0.025, 0.05, 0.1), selected=0.025),
-    selectInput("set.b", "Number of historical years",
-                choices=list(2,3,4,5,6), selected=c(5)),
-     selectInput("set.m", "Number of surrounding 4-week months to use",
-                choices=list(1,2), selected=c(1)),
-    plotOutput("periodPlot")
-  ),
-  server=function(input, output){
-     output$periodPlot = renderPlot({
-       
-b=input$set.b
-m=input$set.m
-freq=52
-
-mod1<-algo.farrington(surv.ds, #dataset to use
-                control=list(range=c(input$week.test),
-                b=5, #How many years of historical data to use
-                w=3, #Number of weeks before and after current week to include in                                 model fitting
-                reweight=TRUE, #Do you want to downweight past epidemics?
-                plot=FALSE,
-                alpha=input$set.alpha
-                ))
-
-col.alarms<-c(rep(1, times=(mod1$control$range[1])-1) , (mod1$alarm+2))
-cols<-c('gray', 'black', 'red')
-plot(mod1$disProgObj$observed , pch=16 , bty='l', ylab='Cases', xlab='Week', col=cols[col.alarms])
-points(c(rep(NA, times=(mod1$control$range[1]-1)) , mod1$upperbound), type='l')
-title('Farrington. Cases vs threshold: alarms are RED')
-
-    },width = "auto", height = "auto")
-  }
-)
+FarringtonApp(ds=ds1, datevar='date', casevar='cases')
 ```
 
 
