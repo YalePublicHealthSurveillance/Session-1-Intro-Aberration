@@ -1,0 +1,552 @@
+---
+title: "Aberration detection methods using the surveillance package"
+output:
+  word_document:
+    toc: yes
+  html_document:
+    toc: yes
+---
+
+```{r setup2, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+#install.packages(c('surveillance','zoo'))
+library(surveillance)
+library(zoo)
+library(shiny)
+```
+
+
+## What is an aberration? 
+
+Let's first generate 5 years of weekly case data, where there is an average of 10 cases per week. We will do this be taking random samples from a Poisson distribution that has a mean of 5 cases. we can then plot the time series
+
+When performing random number generation we use a 'seed' to ensure we can reproduce the results
+```{r rand1}
+set.seed(123) #set a seed so that random number generaiton is reproducible
+```
+
+Generate a time series of cases, with 5 years of weekly data (5*52 time points). The average number of cases is 5
+```{r}
+cases<- rpois( lambda=5, #Mean N cases 
+               n=5*52    #How many observations (5 years of weekly data)
+               )
+```
+
+Plot the time series of cases 
+```{r}
+par(mfrow=c(1,2))
+plot(cases, bty='l', type='l')
+abline(h=5, col='gray') #mean
+```
+
+We can see that there are some weeks when cases are above the average, and some cases below the average. And it even looks (by eye) like there might be some stretches where severla weeks in a row are above average. These number are *randomly generated*: the spikes in cases are real, but there is actually no shift in the underlying 'dynamics' of the system. There might be nothing out the ordinary to investigate (though some of these spikes might be due to actual clusters). We would want to have a way to say whether a particular week or series of weeks is *abnormal*. In other words, has there been a shift in the underlying dynamics?
+
+### Setting a threshold
+The simplest way to set a threshold in an uncomplicated situation like this would be to do something like flag weeks where the number of cases is a certain amount above average. This is sometimes done by calculating the standard deviation of the observed cases and setting a multiple of this as our threshold. in our example, we can see that several weeks are above the threshold during the 5 years of observation. Depending on what disease we are monitoring, this might be too sensitive (as none of these are real aberrations), or not sensitive enough.
+
+What happens if we shift the threshold to be 3 SD above the mean?
+
+```{r rand2 }
+mean.cases<-mean(cases) #Calculate the mean number of cases
+sd.cases<-sd(cases) # Calculate standard deviation of the cases
+
+threshold= mean.cases+2*sd.cases #Set sd at mean + 2*SD
+
+#Plot estimates
+plot(cases, bty='l', type='l')
+abline(h=mean.cases, col='gray')
+abline(h=threshold, col='red', lty=2) #Add the threshold to the plot
+```
+
+### Why this is an oversimplification
+Often the data are more complicated than this. We should be using the correct distribution for rare count data (Poisson or negative binomial) when estimating the threshold. We also might need to adjust for seasonality, or trends in the data. And we might want to detect if several weeks in a row are higher than typical. That is where the algorithms in the surveillance package come in handy.
+
+
+## Introduction to the Surveillance package
+
+The surveillance package in R has a number of commonly-used aberration detection algorithms. These include some very simple algorithms (historical limits method--ie algo.cdc), as well as some highly sophisticated tools (hidden markov models, geospatial models)
+We will go through the analysis of some data on *Salmonella agona* from the UK (1990-1995) that is included with the package. We will also go through some examples laid out in Salmon et al., JSS
+
+## Setting up your data to use with the surveillance package
+The surveillance package requires that the data be formatted in a specific way. We have a data frame that has 312 rows (for weeks), and 2 columns: date of the start of the week, and case count. Looking at the first 10 observations, we can see the data start week 1 of 1990
+
+Import the data provided with the surveillance packae
+```{r}
+data("salmonella.agona") 
+```
+
+create a vector with the time points
+```{r}
+time<-seq.Date(from=as.Date("1990-01-01"),length.out=length(salmonella.agona$observed), by='week') 
+```
+
+Combine together cases data and a vector of time points
+```{r}
+ds1<-cbind.data.frame('date'=time, 'cases'=salmonella.agona$observed)
+```
+
+view first 10 rows
+```{r ds.explore,echo=TRUE}
+ds1[1:10,]
+```
+
+### Inputting the data into the 'surveillance' format
+For the surveillance package, we need to tell the program the name of the time series, when it begins, and how frequently it occurs. We do this using the function 'create.disProg'. We also provide an index for time (1:Ntime points)
+
+```{r setup3, echo=T}
+
+salmonellaDisProg <- create.disProg(
+      week = 1:nrow(ds1), #Index of observations
+      observed = ds1$cases ,  #cases
+      state=matrix(0, nrow=nrow(ds1), ncol=1), #just 0s
+      start = c(1990, 1)) #start date; 1st week of 1990
+
+```
+
+### With time series data, it is always a good idea to plot your observations
+
+
+Plot the data. There are a few things that pop out: an epidemic in 1991 is the most notable. This large outbreak could mess up some of our algorithms. Let's keep an eye on this as we go. There might be a hint of underlying seasonality as well. 
+
+```{r plot1, echo=TRUE}
+plot(time, salmonellaDisProg$observed[,1],  #x and Y variables to plot
+     bty='l',  #turns off top and right axes
+     type='l', #time series plot 
+     ylab='Cases', #y axis label
+     xlab='Date') #x axis labe;
+```
+
+```{r plot.ts,echo=TRUE}
+
+plot( ds1$date, ds1$cases, type='l', bty='l', ylab='Cases', xlab='Date')
+```
+
+
+
+### Historical limits method
+This is a simple method used in some CDC reports of routinely-reported diseases. The method was first described by Stroup et al (Statistics in Medicine 1989). It takes the value in the current week and compares against a historical period occurring at the same time of year. So if we are interested in whether February 2019 counts of measles are unusual, we would take the average of the values of January, February, and March 2014-2018. This gives 5 years*3 months=15 historical data points. We take the mean and variance of these values to create a threshold. Note in his version of the code, it aggregates the weekly data into 4 week 'months', and uses these 4 week blocks as the basis for analysis.
+
+On the positive side, this is a simple, intuitive way to calculate a threshold. And it inherently adjusts for seasonality (because we are only comparing to the same time of year in previous seasons). On the downside, we need at least 5 years of historical data. And there is no way to adjust for trends in the data.
+
+First, let's just test if there is an alarm in a given time point in our data (here we are testing time point 270. If it returns 'FALSE' this indicates there is no alarm
+
+Which week do we want to test for alarms?
+```{r}
+week.test<-270
+```
+
+m: how many time points on either side to use as reference (typical is 1)
+b: number of years to go back in time
+m=1, b=5 will give 15 reference data points
+```{r hist.limits}
+
+hl1<-algo.cdcLatestTimepoint(salmonellaDisProg,control = list(b = 5, #5 year baseline
+                                                              m = 1, #One 4 week period on either side of current 4 week period
+                                                              alpha=0.025,#significance level  
+                                                              timePoint=week.test))
+```
+Was there an alarm this week?
+```{r}
+hl1$alarm
+```
+
+Make a plot
+what color do you want the alarms to be?
+```{r}
+col.alarms<-c(rep(2, times=(week.test-1)) , (hl1$alarm+3), rep(1, times=length(salmonellaDisProg$observed)-week.test ) )
+trans.white<-rgb(1,1,1,alpha=0)
+cols<-c(trans.white,'gray', 'black', 'red')
+```
+
+Aggregate the data into rolling 4 week periods
+```{r}
+all.agg<-rollapply(salmonellaDisProg$observed,4,sum, align='right', fill=NA)
+
+```
+
+```{r}
+par(mfrow=c(1,1))
+plot(all.agg , pch=16 , bty='l', ylab='Cases', xlab='Week', col=cols[col.alarms])
+points(c(rep(NA, times=(week.test-1)) , hl1$upperbound), type='p', col='purple', pch="-")
+title('Historical limits Cases vs threshold: alarms are RED')
+```
+
+To make it more clear what is happening in the analyses, let's highlight which time points are actually being used to calculate the historical average. The red dots are the 4 week period of interest. The black dots show the comparison weeks used to calculate the historical average
+```{r}
+freq=52
+m=1
+b=5
+timePoint=271
+observed<-salmonellaDisProg$observed[,1]
+par(mfrow=c(1,1), mar=c(2,3,1,1))
+for(timePoint.range in c(timePoint )){
+midx <- seq(-m * 4 - 3, m * 4)
+yidx <- ((-b):(-1)) * freq
+    baseidx <- sort(rep(yidx, each = length(midx)) + midx)
+       months <- rep(1:((2 * m + 1) * b), each = 4)
+    basevec <- as.integer(by(observed[timePoint.range + baseidx], months,
+        sum))
+#Generate plot    
+times.include<-timePoint.range + baseidx
+col.vec<-rep(1, times=length(observed))
+col.vec[c(timePoint.range,timePoint.range-1, timePoint.range-2, timePoint.range-3) ]<-2
+col.vec[times.include]<-3
+col.select<-c('gray', 'red', 'black')
+plot(observed, type='p', pch=16, col=col.select[col.vec], bty='l')
+  
+} 
+```
+Then let's do the same thing, looking at different time points of interest. You can see the comparison is with the same time of year in historical periods
+```{r plot.hist.limits.ts}
+observed<-salmonellaDisProg$observed
+
+par(mfrow=c(1,1))
+plot(observed, type='p', pch=16, col='black', bty='l')
+
+freq=52
+m=1
+b=5
+timePoint=271
+par(mfrow=c(4,1), mar=c(2,3,1,1))
+for(timePoint.range in c(timePoint, timePoint+12,timePoint+24,timePoint+36 )){
+midx <- seq(-m * 4 - 3, m * 4)
+yidx <- ((-b):(-1)) * freq
+    baseidx <- sort(rep(yidx, each = length(midx)) + midx)
+       months <- rep(1:((2 * m + 1) * b), each = 4)
+    basevec <- as.integer(by(observed[timePoint.range + baseidx], months,
+        sum))
+    
+#Generate plot    
+times.include<-timePoint.range + baseidx
+col.vec<-rep(1, times=length(observed))
+col.vec[c(timePoint.range,timePoint.range-1, timePoint.range-2, timePoint.range-3) ]<-2
+col.vec[times.include]<-3
+col.select<-c('gray', 'red', 'black')
+plot(observed, type='p', pch=16, col=col.select[col.vec], bty='l')
+  
+}  
+```
+
+### Analyze multiple weeks at once
+As new data come in, we can repeat the analysis. Let's run it for 5 consecutive week, from week 271-275. We can do this easily in a loop and see the sequential testing results. Combine all the code from above into a single chunk and wrap it in a function. Wherever R see the word "week.test' it will substitute in the value we give it in the following chunk
+
+```{r hist.limits2}
+par(mfrow=c(1,1))
+multi.weeks.historical<-function(week.test){
+  hl1<-algo.cdcLatestTimepoint(salmonellaDisProg,control = list(b = 5, 
+                                                              m = 1, 
+                                                              alpha=0.025,
+                                                              timePoint=week.test))
+    print(hl1$alarm)
+  col.alarms<-c(rep(2, times=(week.test-1)) , (hl1$alarm+3), rep(1, times=length(salmonellaDisProg$observed)-week.test ) )
+  trans.white<-rgb(1,1,1,alpha=0)
+  cols<-c(trans.white,'gray', 'black', 'red')
+  all.agg<-rollapply(salmonellaDisProg$observed,4,sum, align='right', fill=NA)
+  plot(all.agg , pch=16 , bty='l', ylab='Cases', xlab='Week', col=cols[col.alarms])
+  points(c(rep(NA, times=(week.test-1)) , hl1$upperbound), type='p', col='purple', pch="-")
+  #title('Historical limits Cases vs threshold: alarms are RED')
+}
+```
+
+Let's first just try to test week 272
+```{r}
+multi.weeks.historical(week.test=272)
+```
+
+Or we can ask R to test a bunch of weeks sequentially. We do this using 'lapply'. we will create a vector with the week numbers we want to test, and feed that to the function. here we are asking R to cycle through weeks 270-275, and running our function on each. This shows that all five weeks gave an 'all-clear' signal. This approach would be useful if you are running things in real time, asking it to update the analyses each week.
+
+```{r}
+lapply(c(270:275), multi.weeks.historical)
+```
+
+We can also directly of values at once retrospectively: week 270-300. (try to look at weeks 300-312 instead). What if we change the value of alpha?
+
+```{r hist.limits3}
+hl2<-algo.cdc(salmonellaDisProg,control = list(b = 5,  #N years in baseline
+                                               m = 1, #N 4 week periods on either side
+                                              alpha=0.05, #Signifiance level
+                                               range=c(270:300)))#weeks tested
+
+#This stuff just makes a pretty plot
+col.alarms<-c(rep(1, times=(hl2$control$range[1]-1)) , (hl2$alarm+2))
+cols<-c('gray', 'black', 'red')
+all.agg<-rollapply(salmonellaDisProg$observed,4,sum, align='right', fill=NA)
+plot(all.agg , pch=16 , bty='l', ylab='Cases', xlab='Week', col=cols[col.alarms])
+points(c(rep(NA, times=(hl2$control$range[1]-1)) , hl2$upperbound), type='l')
+title('Historical limits Cases vs threshold: alarms are RED')
+
+```
+
+
+
+
+
+
+## Farrington method
+
+Many public health agencies use variations of an algorithm developed by Farrington, where we are testing whether the observed number of cases at a particular time point are above an epidemic threshold. 
+
+This method has several advantages:
+1. Tests for and adjusts for trend automatically
+2. Iterative process that downweights influence of past epidemics (increasing chances of detecting future epidemics)
+3. Like the Historical limits method, this method deals with seasonality by only taking values from the same time of year when setting a threshold.
+4. Designed for count data and doesn't make assumptions about the data being normally distributed; this is more appropriate for sparse data
+
+*What happens if you don't downweight past epidemics?*
+
+```{r farrington1, echo=TRUE}
+#for(i in c(260:270))
+mod1<-algo.farrington(salmonellaDisProg, #dataset to use
+                control=list(range=c(270:312),
+                b=5, #How many years of historical data to use
+                w=3, #Number of weeks before and after current week to include in                                 model fitting
+                reweight=TRUE, #Do you want to downweight past epidemics?
+                plot=FALSE
+                ))
+
+col.alarms<-c(rep(1, times=(mod1$control$range[1])-1) , (mod1$alarm+2))
+cols<-c('gray', 'black', 'red')
+plot(mod1$disProgObj$observed , pch=16 , bty='l', ylab='Cases', xlab='Week', col=cols[col.alarms])
+points(c(rep(NA, times=(mod1$control$range[1]-1)) , mod1$upperbound), type='l')
+title('Farrington. Cases vs threshold: alarms are RED')
+```
+
+## CUSUM approaches
+
+All of the methods discussed so far evaluate whether the number of cases at a specific time point exceed an epidemic threshold. However, we often interested in seeing if there has been a change in the underlying risk the shows up in multiple consescutive time points. Methods that evaluate the CUmulative SUM (CUSUM) methods are designd to do this and are often more robust and ensitivte to accumulated changes.
+
+##Play around by directly modifying K and H. 
+*Run this chunk.*
+```{r ,echo=FALSE }
+shinyApp(
+  ui=fluidPage(
+    
+
+    sliderInput("K.set", "K threshold:",
+                min=0, max=max(salmonellaDisProg$observed[,1]), value=2),
+    sliderInput("H.set", "H threshold:",
+               min=1, max=100, value=2),
+    plotOutput("periodPlot")
+  ),
+  server=function(input, output){
+     output$periodPlot = renderPlot({
+     in.control.mean<- mean(salmonellaDisProg$observed[-c(1:52)])
+      epidemic.increase=input$epidemic.increase #how big of an increase do you want to detect?
+      
+      s1=(epidemic.increase-1)/sqrt(in.control.mean)
+      sd.y<-sd(salmonellaDisProg$observed[,1])
+      mean.y<-mean(salmonellaDisProg$observed[,1])
+
+      
+      cusum1<-algo.cusum(salmonellaDisProg, control = list(range=53:312, k = input$K.set , h = input$H.set, trans = "standard", alpha = NULL ))
+      
+      K.std<- input$K.set*sd.y +mean.y
+      par(mfrow=c(2,1))
+      plot(cusum1$disProgObj$observed[53:312], bty='l',type='l', ylab='Cases')
+      abline(h= K.std)
+      title(paste0('Observed data with K=',round(input$K.set,2)))
+      
+      plot(cusum1$cusum, type='p', bty='l',pch=16, col=cusum1$alarm+1, ylab='CUSUM')
+      abline(h= input$H.set)
+      title(paste0('CUSUM statistic with H=', round(input$H.set,2),' red=ALARM'))
+
+      
+    },width = "auto", height = "auto")
+  }
+)
+```
+
+Automated h level detection (doesn't always work super well)
+```{r ,echo=FALSE }
+shinyApp(
+  ui=fluidPage(
+    
+
+    sliderInput("ARL", "ARL:",
+                min=13, max=520, value=104),
+    sliderInput("SD.increase", "SD Increase:",
+               min=0.25, max=5, value=2),
+    plotOutput("periodPlot")
+  ),
+  server=function(input, output){
+     output$periodPlot = renderPlot({
+      sd.y<-sd(salmonellaDisProg$observed[,1])
+      mean.y<-mean(salmonellaDisProg$observed[,1])
+      
+       in.control.mean<- mean(salmonellaDisProg$observed[-c(1:52)])
+      ARL.set <- input$ARL #an ARL of 104 says we want 1 false alarm ever 2 years (2*52 weeks)
+ 
+      #s1=(epidemic.increase-1)/sqrt(in.control.mean)
+      s1=(input$SD.increase-mean.y)/sd.y
+      optimized.parms<-findH(ARL0=ARL.set, theta0=in.control.mean, s = s1, rel.tol = 0.1, roundK = FALSE, distr = c("poisson"))
+
+      # theta1 <- in.control.mean*epidemic.increase
+      # s1=(theta1-in.control.mean)/sqrt(in.control.mean)
+      # optimized.parms<-findH(ARL0=ARL.set, theta0=in.control.mean, s = 1, rel.tol = 0.03, roundK = FALSE, distr = c("poisson"))
+
+      k.optimized<- optimized.parms['k']
+      h.optimized<- optimized.parms['h']
+      K.std<- k.optimized*sd.y +mean.y
+
+      cusum1<-algo.cusum(salmonellaDisProg, control = list(range=53:312, k = k.optimized , h = h.optimized, 
+                                                           trans = "standard", alpha = NULL ))
+      
+      par(mfrow=c(2,1))
+      plot(cusum1$disProgObj$observed[53:312], bty='l',type='l', ylab='Cases')
+      abline(h= K.std )
+      title(paste0('Observed data with K=',round(k.optimized,2), ', ARL=', ARL.set, ' weeks'))
+      
+      plot(cusum1$cusum, type='p', bty='l',pch=16, col=cusum1$alarm+1, ylab='CUSUM')
+      abline(h= h.optimized)
+      title(paste0('CUSUM statistic with H=', round(h.optimized,2),' red=ALARM'))
+
+      
+    },width = "auto", height = "auto")
+  }
+)
+``` 
+
+#### Unadjusted Poisson CUSUM 
+
+Let's say we want to detect a 2-fold increase in the mean number of cases compared to the 'in-control' mean. We will empircally determine the in-control mean by looking at the average number of cases in the first 52 weeks. And we will set an arbitrary threshold of 4 for the H value.
+
+```{r cusum-simple2, fig.width=6, fig.height=8}
+in.control.mean<- mean(salmonellaDisProg$observed[1:52])
+epidemic.increase=2 #how big of an increase do you want to detect?
+epidemic.obs<-in.control.mean*epidemic.increase
+h.threshold=4 #What is H threshold?
+ sd.y<-sd(salmonellaDisProg$observed[,1])
+mean.y<-mean(salmonellaDisProg$observed[,1])
+k.select<-findK( theta0=in.control.mean ,theta1=in.control.mean*epidemic.increase, dist='poisson')
+
+cusum1<-algo.cusum(salmonellaDisProg, control = list(range=53:312, k = k.select, h = h.threshold, trans = "standard", alpha = NULL ))
+K.std<- k.select*sd.y +mean.y
+
+par(mfrow=c(2,1), mar=c(2,3,1,1))
+plot(cusum1$disProgObj$observed[53:312], bty='l',type='l')
+abline(h= K.std)
+title('Observed data with K threshold')
+
+plot(cusum1$cusum, type='p', bty='l',pch=16, col=cusum1$alarm+1)
+abline(h= cusum1$control$h)
+title('CUSUM statistic with H threshold; red=ALARM')
+```
+
+## How do we optimize the K and H thresholds?
+
+The surveillance package has a function called arlCusum to help with this. We use the concept of "Average Run Length", which is how long we many time periods we want to have between false positive signals. If we have a short ARL, we will have more false signals (but more sensitivity), a longer ARL will give fewer false signals (but lower sensitivity). You can play around with the H threshold and the 'epidemic.increase' parameter here to see how it affects the estimates. See what happens when you play around with the ARL
+
+```{r cusum-arl,  fig.width=6, fig.height=8}
+
+in.control.mean<- mean(salmonellaDisProg$observed[1:52])
+sd.y<-sd(salmonellaDisProg$observed[,1])
+mean.y<-mean(salmonellaDisProg$observed[,1])
+ARL.set <- 104 #an ARL of 104 says we want 1 false alarm ever 2 years (2*52 weeks)
+epidemic.increase=2 #how big of an increase do you want to detect?
+
+theta1 <- in.control.mean*epidemic.increase
+s1=(theta1-in.control.mean)/sqrt(in.control.mean)
+
+optimized.parms<-findH(ARL0=ARL.set, theta0=in.control.mean, s = s1, rel.tol = 0.03, roundK = FALSE, distr = c("poisson"))
+
+k.optimized<- optimized.parms['k']
+h.optimized<- optimized.parms['h']
+K.std<- k.optimized*sd.y +mean.y
+
+cusum1<-algo.cusum(salmonellaDisProg, control = list(range=53:312, k = k.optimized , h = h.optimized, trans = "standard", alpha = NULL ))
+
+par(mfrow=c(2,1), mar=c(2,2,1,1))
+plot(cusum1$disProgObj$observed[53:312], bty='l',type='l')
+abline(h= K.std )
+title(paste0('Observed data with K=',round(k.optimized,2), ', ARL=', ARL.set, ' weeks'))
+
+plot(cusum1$cusum, type='p', bty='l',pch=16, col=cusum1$alarm+1)
+abline(h= h.optimized)
+title(paste0('CUSUM statistic with H=', round(h.optimized,2),' red=ALARM'))
+```
+
+
+
+ 
+
+## What if there is seasonality in the data?
+-Modified CUSUM-type approaches exist (algo.rogerson, algo.glrpois)
+-Or we can use regression-based approaches to detect increase in a single time point
+-Next time we will discuss the fitting and use of these harmonic models to account for both seasonality and trend
+
+
+###  use the CUSUM algorithm with seasonal adjustment
+What happens when you play around with K threshold here? (ie try to crank it up to 4)
+```{r cusum.seas, fig.width=6, fig.height=8}
+k.set=5
+h.set=2
+cusum1<-algo.cusum(salmonellaDisProg, control = list(range=53:312, 
+                                                k = k.set , 
+                                                h = h.set, 
+                                                m='glm', #turn on seasonal adjustment
+                                                trans = "standard", 
+                                                alpha = NULL ))
+
+m.plot<-c(rep(NA, times=(cusum1$control$range[1]-1)),cusum1$control$m)
+cusum.plot<-c(rep(NA, times=(cusum1$control$range[1]-1)),cusum1$cusum)
+alarm.vec<- c(rep(1, times=(cusum1$control$range[1]-1)),cusum1$alarm+2 )
+col.alarm.vec=c('gray', 'black','red')
+sd.y<-sd(salmonellaDisProg$observed[,1])
+mean.y<-mean(salmonellaDisProg$observed[,1])
+#K.std<- ((k.set-mean.y)/sd.y )+ m.plot
+K.std<- k.set+ m.plot
+
+par(mfrow=c(2,1))
+plot(cusum1$disProgObj$observed, bty='l',type='p', ylab='Observed cases',col=col.alarm.vec[alarm.vec], pch=16)
+#abline(h= k.optimized )
+points(m.plot, type='l', col='gray', lty=2)
+points(K.std, type='l', col='gray', lty=2)
+title(paste0('Observed data',k.set))
+
+plot(cusum.plot, type='p', bty='l',pch=16, col=col.alarm.vec[alarm.vec])
+abline(h= h.set)
+title(paste0('CUSUM statistic with H=', h.set,' red=ALARM'))
+```
+
+### Here is an alternative algorithm for seasonal CUSUM 
+-What happens if you turn trend to true?
+```{r glr.seas,fig.width=6, fig.height=8}
+mod1<- algo.glrpois(salmonellaDisProg,control=list(
+   range=c(53:312),
+   c.ARL=5,
+   M=-1, #How many time points back should we look? Negative 1: use all cases
+   ret=c('value'),
+  mu0=list( trend=F, #Trend adjustment?
+   S=1) #Seasonality? 0=no, 1 or 2 = # harmonics to include
+))
+
+glr.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$upperbound[,1] )
+m.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$control$mu0 )
+
+alarm.vec<- c(rep(1, times=(mod1$control$range[1]-1)),mod1$alarm+2 )
+col.alarm.vec=c('gray', 'black','red')
+
+par(mfrow=c(2,1), mar=c(2,2,2,1))
+plot(mod1$disProgObj$observed[,1], bty='l',type='p', ylab='Observed cases',col=col.alarm.vec[alarm.vec], pch=16)
+points(m.vec, type='l', col='black')
+title('Observed cases and mean')
+
+plot(glr.vec, bty='l',type='p', ylab='GLR statistic',col=col.alarm.vec[alarm.vec], pch=16)
+abline(h=mod1$control$c.ARL, lty=2)
+title('GLR statistic')
+#abline(h= k.optimized )
+#title(paste0('Observed data with K=',round(k.optimized,2), ', ARL=', ARL.set, ' weeks'))
+
+
+```
+
+EARS designed to work with daily data; rapid signal
+```{r ears,fig.width=6, fig.height=8}
+# 
+# stsObj <- disProg2sts( salmonellaDisProg)
+# ear.mod<-earsC(stsObj,control = list(range=53:312, 
+#                                                method='C3' ))
+# par(mfrow=c(1,1))
+# plot(ear.mod)
+
+```
