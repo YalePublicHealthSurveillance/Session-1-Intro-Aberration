@@ -70,7 +70,7 @@ app.hist.limit <-function(ds=ds1, datevar='date', casevar='cases'){
       col.vec[prev.times]<-3
       col.select<-c('white', 'blue', 'black','red')
       plot(all.agg, type='p', pch=16, col=col.select[col.vec], bty='l', main='Black=comparison periods, purple=threshold')
-      points(c(rep(NA, times=(input$week.test-1)) , upCI), type='p', col='purple', pch="-")
+      points(c(rep(NA, times=(input$week.test-1)) , upCI), type='p', cex=3,col='purple', pch="-")
       points(all.agg ,type='l', col='gray')
       
     },width = "auto", height = "auto")

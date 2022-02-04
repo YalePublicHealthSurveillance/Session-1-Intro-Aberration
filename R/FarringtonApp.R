@@ -56,7 +56,7 @@ shinyApp(
       plot.obs <- ds[,casevar]
       plot.obs[(input$week.test+1) : length(plot.obs)] <- NA
       plot(plot.obs , pch=16 , bty='l', ylab='Cases', xlab='Week',  col=col.select[col.vec], xlim=c(1,length(plot.obs)))
-      points(c(rep(NA, times=(input$week.test-1)) , mod1$upperbound), type='p', col='purple', pch="-")
+      points(c(rep(NA, times=(input$week.test-1)) , mod1$upperbound), type='p', col='purple',cex=3, pch="-")
       points(plot.obs ,type='l', col='gray')
       
       title('Farrington. Cases vs threshold: alarms are RED')
