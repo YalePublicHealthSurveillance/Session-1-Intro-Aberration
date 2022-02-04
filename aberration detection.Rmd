@@ -227,12 +227,28 @@ glrpois_App(ds=sim.ds.seas, datevar='date', casevar='cases.seas')
 
 ```
 
-
+Now try with real data. 
 -What happens if you turn trend to true?
 ```{r glr.seas,fig.width=6, fig.height=8}
 
 glrpois_App(ds=ds1, datevar='date', casevar='cases')
 
+```
+
+## Simulated data where there is a known change
+```{r}
+n.times <- 10*52 #5 weeks of weekly data
+
+log.lambda <- log(5) + 0.5*sin(2*pi*(1:n.times)/52) 
+
+cases.seas2<- rpois( lambda=exp(log.lambda), #Mean N cases 
+               n=n.times    #How many observations (5 years of weekly data)
+               )
+
+date <- seq.Date(from=as.Date('2005-01-01'), length.out=n.times, by='week')
+sim.ds.seas2 <- cbind.data.frame('date'=date, cases.sea2s)
+
+head(sim.ds.seas2)
 ```
 
 
