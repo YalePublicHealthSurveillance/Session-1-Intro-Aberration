@@ -220,6 +220,14 @@ There are many different CUSUM-type algorithms. We will use one called glrnb. Th
 If you specify season=T or trend=T, it fits a trend to data before the evaluation period. Here we hold the first year of data out to allow for training of the seasonality component
 
 ### Here is an alternative algorithm for seasonal CUSUM 
+
+First on the simulated data...
+```{r}
+glrpois_App(ds=sim.ds.seas, datevar='date', casevar='cases.seas')
+
+```
+
+
 -What happens if you turn trend to true?
 ```{r glr.seas,fig.width=6, fig.height=8}
 
