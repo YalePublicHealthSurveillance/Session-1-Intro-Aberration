@@ -15,6 +15,7 @@ library(zoo)
 library(shiny)
 library(lubridate)
 library(ggplot2)
+library(plotly)
 source('./R/App_Hist_limit.R')
 source('./R/FarringtonApp.R')
 source('./R/glrpoisApp.R')
@@ -24,7 +25,7 @@ source('./R/surv.ds.convert.R')
 ```
 
 
-## What is an aberration? 
+## Part 1: What is an aberration? 
 
 Let's first generate 5 years of weekly case data, where there is an average of 10 cases per week. We will do this be taking random samples from a Poisson distribution that has a mean of 5 cases. we can then plot the time series
 
@@ -66,6 +67,7 @@ p1 +
 We can see that there are some weeks when cases are above the average, and some cases below the average. And it even looks (by eye) like there might be some stretches where severla weeks in a row are above average. These number are *randomly generated*: the spikes in cases are real, but there is actually no shift in the underlying 'dynamics' of the system. There might be nothing out the ordinary to investigate (though some of these spikes might be due to actual clusters). We would want to have a way to say whether a particular week or series of weeks is *abnormal*. In other words, has there been a shift in the underlying dynamics?
 
 Also simulate a time series with seasonality and random noise.
+
 ```{r}
 n.times <- 10*52 #5 weeks of weekly data
 
@@ -76,6 +78,7 @@ cases.seas<- rpois( lambda=exp(log.lambda), #Mean N cases
                )
 
 date <- seq.Date(from=as.Date('2005-01-01'), length.out=n.times, by='week')
+
 sim.ds.seas <- cbind.data.frame('date'=date, cases.seas)
 
 head(sim.ds.seas)
@@ -85,10 +88,16 @@ head(sim.ds.seas)
 p2 <- ggplot(sim.ds.seas , aes(x=date, y=cases.seas)) +
   geom_line() +
   theme_classic() 
+
 p2 +
     geom_hline(yintercept=5, col='gray', lty=2)
 
 ```
+Side note: make your plot interactive with ggplotly
+```{r}
+ggplotly(p2)
+```
+
 
 
 ### Setting a threshold
@@ -125,7 +134,7 @@ p2 +
 Often the data are more complicated than this. We should be using the correct distribution for rare count data (Poisson or negative binomial) when estimating the threshold. We also might need to adjust for seasonality, or trends in the data. And we might want to detect if several weeks in a row are higher than typical. That is where the algorithms in the surveillance package come in handy.
 
 
-## Introduction to the Surveillance package
+## Part 2: Introduction to the Surveillance package
 
 The surveillance package in R has a number of commonly-used aberration detection algorithms. These include some very simple algorithms (historical limits method--ie algo.cdc), as well as some highly sophisticated tools (hidden markov models, geospatial models)
 We will go through the analysis of some data on *Salmonella agona* from the UK (1990-1995) that is included with the package. We will also go through some examples laid out in Salmon et al., JSS
@@ -184,7 +193,7 @@ app.hist.limit(ds=ds1, datevar='date', casevar='cases')
 
 
 
-## Farrington method
+## Part 3: Farrington method
 
 Many public health agencies use variations of an algorithm developed by Farrington, where we are testing whether the observed number of cases at a particular time point are above an epidemic threshold. 
 
@@ -210,7 +219,7 @@ FarringtonApp(ds=ds1, datevar='date', casevar='cases')
 
 
 
-## CUSUM approaches
+## Part 4 CUSUM approaches
 
 All of the methods discussed so far evaluate whether the number of cases at a specific time point exceed an epidemic threshold. However, we often interested in seeing if there has been a change in the underlying risk the shows up in multiple consecutive time points. Methods that evaluate the CUmulative SUM (CUSUM) methods are designd to do this and are often more robust and ensitivte to accumulated changes.
 
@@ -219,7 +228,7 @@ There are many different CUSUM-type algorithms. We will use one called glrnb. Th
 
 If you specify season=T or trend=T, it fits a trend to data before the evaluation period. Here we hold the first year of data out to allow for training of the seasonality component
 
-### Here is an alternative algorithm for seasonal CUSUM 
+### Here is an algorithm for seasonal CUSUM 
 
 First on the simulated data...
 ```{r}
@@ -259,7 +268,7 @@ sim.ds.seas2 <- cbind.data.frame('date'=date, cases.seas2)
 
 head(sim.ds.seas2)
 
-plot(cases.seas2)
+plot(cases.seas2, type='l')
 ```
 
 ```{r}
