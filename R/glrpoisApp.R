@@ -7,9 +7,13 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
       
       
       sliderInput("week.test", "Current Week:",
-                  min=(n.weeks.train+15), max=nrow(ds), value=(n.weeks.train+15), step=1),
+                  min=(n.weeks.train+15), max=nrow(ds), value=(n.weeks.train+15), step=1,
+                  animate =
+                    animationOptions(interval = 100, loop = TRUE)),
       sliderInput("set.thresh", "Threshold for alarm (default=5):",
                   min=1, max=10, value=5),
+      sliderInput("set.RR", "Rate ratio for out-of-control mean:",
+                  min=1, max=4, value=1.5, step=0.1),
       selectInput('adjust.season', 'Adjust seasonality?', selected='1 seasonal term', choices=c('No adjustment', '1 seasonal term', '2 seasonal terms')  ),
       checkboxInput('adjust.trend', 'Adjust trend?', value=F ),
       checkboxInput('fit.negbin', 'Use negative binomial instead of Poisson?', value=F ),
@@ -30,6 +34,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
           M=-1, #How many time points back should we look? Negative 1: use all cases
           ret=c('value'),
           alpha=NULL,
+          theta= log(input$set.RR),
           mu0=list( trend=input$adjust.trend, #Trend adjustment?
                     S=season.adjust) #Seasonality? 0=no, 1 or 2 = # harmonics to include
          )) }else{
@@ -39,6 +44,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
             M=-1, #How many time points back should we look? Negative 1: use all cases
             ret=c('value'),
             alpha=0,
+            theta= log(input$set.RR),
             mu0=list( trend=input$adjust.trend, #Trend adjustment?
                       S=season.adjust) #Seasonality? 0=no, 1 or 2 = # harmonics to include
           ))
@@ -57,7 +63,9 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
         
         plot(ds[1:length(plot.obs),datevar],plot.obs, bty='l',type='p', ylab='Observed cases',col=col.alarm.vec[alarm.vec], pch=16)
         points(ds[1:length(m.vec),datevar],m.vec, type='l', col='black')
-        title('Observed cases and mean')
+        points(ds[1:length(m.vec),datevar],m.vec*input$set.RR, type='l', col='gray', lty=2)
+        
+                title('Observed cases and mean')
         
         plot(ds[1:length(glr.vec),datevar],glr.vec, bty='l',type='p', ylab='GLR statistic',col=col.alarm.vec[alarm.vec], pch=16, xlim=c(min(ds[,datevar]),max(ds[,datevar]) ), 
               ylim=c(0, max(6,max(glr.vec, na.rm=T))))
